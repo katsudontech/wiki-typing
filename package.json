@@ -9,9 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@mogamoga1024/typing-jp": "^1.2.4",
     "next": "16.2.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "wanakana": "^5.3.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
