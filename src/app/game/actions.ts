@@ -4,21 +4,41 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { revalidatePath } from 'next/cache';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" }); // 最新の高速モデルを使おう！
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); // 最新の高速モデルを使おう！
 
 // ▼ タイピング用のお題を生成するアクション
-export async function getTypingText(maxLength: number = 500) {
+export async function getTypingText(maxLength: number = 500, category: string = '') {
   try {
-    // 1. Wikipediaからランダムな記事を取得（ロジックはさっきと同じ）
-    const wikiApiUrl = 'https://ja.wikipedia.org/w/api.php?action=query&format=json&list=random&rnnamespace=0&rnlimit=1';
-    const wikiRes = await fetch(wikiApiUrl, { cache: 'no-store' }); // 常に新しい記事を
-    const wikiData = await wikiRes.json();
-    const pageId = wikiData.query.random[0].id;
+    let pageId;
+
+    // カテゴリ（キーワード）が指定されている場合は、そのキーワードで検索してランダムに取得
+    if (category.trim() !== '') {
+      // 検索パラメータを厳密なincategoryから、通常のキーワード検索に変更
+      const searchUrl = `https://ja.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=${encodeURIComponent(category.trim())}&srlimit=50`;
+      const searchRes = await fetch(searchUrl, { cache: 'no-store' });
+      const searchData = await searchRes.json();
+      const results = searchData.query?.search;
+      
+      if (results && results.length > 0) {
+        // 検索結果からランダムに1つの記事を選ぶ
+        const randomItem = results[Math.floor(Math.random() * results.length)];
+        pageId = randomItem.pageid;
+      }
+    }
+
+    // カテゴリ指定がない、あるいは検索結果が見つからなかった場合は完全ランダム
+    if (!pageId) {
+      const wikiApiUrl = 'https://ja.wikipedia.org/w/api.php?action=query&format=json&list=random&rnnamespace=0&rnlimit=1';
+      const wikiRes = await fetch(wikiApiUrl, { cache: 'no-store' });
+      const wikiData = await wikiRes.json();
+      pageId = wikiData.query.random[0].id;
+    }
 
     const textApiUrl = `https://ja.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=&explaintext=&pageids=${pageId}`;
     const textRes = await fetch(textApiUrl);
     const textData = await textRes.json();
     const originalText = textData.query.pages[pageId].extract;
+    const pageTitle = textData.query.pages[pageId].title;
 
     if (!originalText || originalText.length < 50) throw new Error('Short text');
 
@@ -41,8 +61,9 @@ export async function getTypingText(maxLength: number = 500) {
     if (!jsonMatch) throw new Error('Invalid Gemini Response');
     
     const data = JSON.parse(jsonMatch[0]);
+    const wikiUrl = `https://ja.wikipedia.org/?curid=${pageId}`;
 
-    return data;
+    return { ...data, url: wikiUrl, title: pageTitle };
 
   } catch (error) {
     console.error(error);

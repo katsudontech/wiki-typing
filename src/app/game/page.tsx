@@ -23,6 +23,7 @@ export default function TypingGame() {
   const [missCount, setMissCount] = useState(0);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [results, setResults] = useState<{ kpm: number; accuracy: number; time: number } | null>(null);
+  const [wikiInfo, setWikiInfo] = useState<{ title: string; url: string }>({ title: '', url: '' });
 
   // --- 補助関数 ---
 
@@ -40,10 +41,12 @@ export default function TypingGame() {
   const fetchNewText = useCallback(async () => {
     setLoading(true);
     setResults(null);
-    const maxTextLength = 500;
-    const result = await getTypingText(maxTextLength);
+    const maxTextLength = localStorage.getItem('typingMaxLength') ? Number(localStorage.getItem('typingMaxLength')) : 500;
+    const category = localStorage.getItem('typingCategory') || '';
+    const result = await getTypingText(maxTextLength, category);
     if (!result.error) {
       setKanji(result.kanji);
+      setWikiInfo({ title: result.title || '', url: result.url || '' });
       // 🌟 記号を取り除いてからライブラリに渡す
       const cleanHiragana = result.hiragana.replace(/[『』「」()（）]/g, '');
       const newTyping = new TypingText(cleanHiragana);
@@ -102,6 +105,19 @@ export default function TypingGame() {
           // 正確率: 正解文字数 / (正解文字数 + ミス数)
           const accuracy = Math.floor((totalKeys / (totalKeys + missCount)) * 100);
 
+          //localStorageに記録を保存
+          const history = JSON.parse(localStorage.getItem('typingHistory') || '[]');
+          history.push({ 
+            kanji, 
+            title: wikiInfo.title,
+            url: wikiInfo.url,
+            kpm, 
+            accuracy, 
+            time: timeInSeconds, 
+            date: new Date().toISOString() 
+          });
+          localStorage.setItem('typingHistory', JSON.stringify(history));
+
           setResults({ kpm, accuracy, time: timeInSeconds });
           break;
       }
@@ -112,7 +128,7 @@ export default function TypingGame() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [typing, startTime, missCount, results, syncDisplay]);
+  }, [typing, startTime, missCount, results, syncDisplay, kanji, wikiInfo]);
 
   // --- レンダリング (UI) ---
 

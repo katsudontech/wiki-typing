@@ -27,6 +27,7 @@ export default function TypingTitle() {
         </div>
         <div className="mt-12 text-sm text-gray-500">
             <Link href="/settings" className="hover:underline">Settings</Link>
+            <Link href="/stats" className="ml-4 hover:underline">Statistics</Link>
         </div>
       </div>
     </main>
