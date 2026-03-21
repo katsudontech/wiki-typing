@@ -2,13 +2,12 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { revalidatePath } from 'next/cache';
-import * as wanakana from 'wanakana';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" }); // 最新の高速モデルを使おう！
 
 // ▼ タイピング用のお題を生成するアクション
-export async function getTypingText() {
+export async function getTypingText(maxLength: number = 500) {
   try {
     // 1. Wikipediaからランダムな記事を取得（ロジックはさっきと同じ）
     const wikiApiUrl = 'https://ja.wikipedia.org/w/api.php?action=query&format=json&list=random&rnnamespace=0&rnlimit=1';
@@ -24,14 +23,16 @@ export async function getTypingText() {
     if (!originalText || originalText.length < 50) throw new Error('Short text');
 
     // 2. Gemini APIで変換
-    const prompt = `以下の日本語を、漢字と「全てひらがな」に変換してJSONで返して。
+    const prompt = `以下の日本語を、タイピング練習の文章として
+ふさわしい形で、最大${maxLength}文字に要約した上で、
+漢字と「全てひらがな」に変換してJSONで返して。
     【超重要ルール】
     1. ひらがな側には、『』や「」、（）などの記号を絶対に含まないこと。
     2. 句読点（。、）もタイピングの邪魔になるので、ひらがな側からは取り除いて。
     3. 全て繋げたひらがなのみを出力して。
 
     {"kanji": "...", "hiragana": "..."}
-    テキスト：${originalText.substring(0, 500)}`;
+    テキスト：${originalText}`;
     const result = await model.generateContent(prompt);
     const geminiRes = result.response.text();
     
@@ -41,9 +42,7 @@ export async function getTypingText() {
     
     const data = JSON.parse(jsonMatch[0]);
 
-    const romaji = wanakana.toRomaji(data.hiragana);
-
-    return { ...data, romaji: romaji.toLowerCase() };
+    return data;
 
   } catch (error) {
     console.error(error);

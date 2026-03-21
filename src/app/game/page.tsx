@@ -40,7 +40,8 @@ export default function TypingGame() {
   const fetchNewText = useCallback(async () => {
     setLoading(true);
     setResults(null);
-    const result = await getTypingText();
+    const maxTextLength = 500;
+    const result = await getTypingText(maxTextLength);
     if (!result.error) {
       setKanji(result.kanji);
       // 🌟 記号を取り除いてからライブラリに渡す
