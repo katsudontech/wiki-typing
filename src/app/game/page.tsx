@@ -104,6 +104,8 @@ export default function TypingGame() {
           const kpm = Math.floor((totalKeys / timeInSeconds) * 60);
           // 正確率: 正解文字数 / (正解文字数 + ミス数)
           const accuracy = Math.floor((totalKeys / (totalKeys + missCount)) * 100);
+          // e-typingのスコア
+          const eTypingScore = Math.floor(kpm * ((accuracy / 100) ** 3));
 
           //localStorageに記録を保存
           const history = JSON.parse(localStorage.getItem('typingHistory') || '[]');
@@ -113,6 +115,7 @@ export default function TypingGame() {
             url: wikiInfo.url,
             kpm, 
             accuracy, 
+            eTypingScore,
             time: timeInSeconds, 
             date: new Date().toISOString() 
           });
@@ -180,30 +183,34 @@ export default function TypingGame() {
         </div>
       ) : (
         /* 通常のタイピング画面 */
-        <div className="max-w-5xl w-full px-8 text-center">
-          <h1 className="text-4xl font-bold mb-10 text-gray-800 leading-relaxed min-h-[4rem]">
-            {kanji}
-          </h1>
+        <div className="max-w-5xl w-full px-4 md:px-8 text-center flex flex-col max-h-[95vh] py-8">
+          {/* お題（漢字交じり）の表示部分：文字を小さくし、長ければスクロール */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-6 overflow-y-auto max-h-[25vh] text-left">
+            <h1 className="text-xl md:text-2xl font-bold text-gray-700 leading-relaxed">
+              {kanji}
+            </h1>
+          </div>
 
-          <div className="bg-white p-16 rounded-[2.5rem] shadow-2xl border border-gray-100 mb-10 relative overflow-hidden">
+          {/* タイピング入力部分（ローマ字・ひらがな）：アルファベットを小さくし、枠内に収める */}
+          <div className="bg-white p-8 md:p-12 rounded-[2rem] shadow-2xl border border-gray-100 mb-6 relative text-left overflow-y-auto max-h-[50vh]">
             {/* 装飾用の背景ロゴ的なもの */}
-            <div className="absolute top-4 right-6 text-gray-100 font-black text-2xl select-none">HHKB TYPE</div>
+            <div className="absolute top-6 right-8 text-gray-100 font-black text-xl select-none">HHKB TYPE</div>
             
             {/* ひらがなガイド */}
-            <div className="text-2xl mb-6 font-medium tracking-[0.3em] min-h-[2rem]">
+            <div className="text-lg md:text-xl mb-4 font-medium tracking-[0.2em] min-h-[2rem]">
               <span className="text-gray-200">{display.completedText}</span>
-              <span className="text-blue-400">{display.remainingText}</span>
+              <span className="text-blue-500">{display.remainingText}</span>
             </div>
 
-            {/* メインのローマ字表示 */}
-            <div className="text-6xl font-mono tracking-[0.15em] break-all leading-tight">
-              <span className="text-gray-100">{display.completedRoman}</span>
-              <span className="text-gray-900">{display.remainingRoman}</span>
+            {/* メインのローマ字表示 (text-6xl から 3xl に縮小) */}
+            <div className="text-3xl md:text-4xl font-mono tracking-wider break-all leading-relaxed">
+              <span className="text-gray-200">{display.completedRoman}</span>
+              <span className="text-gray-800">{display.remainingRoman}</span>
             </div>
           </div>
 
           {/* 下部のインフォメーション */}
-          <div className="flex justify-between items-center text-gray-400 text-sm px-6">
+          <div className="flex justify-between items-center text-gray-400 text-sm px-2 md:px-6 mt-auto">
             <div className="flex gap-8">
               <span>MISS: <span className={`font-bold ${missCount > 0 ? 'text-red-400' : 'text-gray-300'}`}>{missCount}</span></span>
               <span>PROGRESS: <span className="text-gray-600 font-bold">{Math.floor((display.completedText.length / (display.completedText.length + display.remainingText.length || 1)) * 100)}%</span></span>
