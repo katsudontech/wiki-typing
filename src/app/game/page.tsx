@@ -7,6 +7,7 @@ import { TypingText } from "@mogamoga1024/typing-jp";
 export default function TypingGame() {
   // --- 状態管理 (State) ---
   const [kanji, setKanji] = useState(''); // 漢字（お題）
+  const [segments, setSegments] = useState<{text: string, reading: string}[]>([]); // 追加: お題の分割データ
   const [typing, setTyping] = useState<TypingText | null>(null); // タイピングロジック
   const [loading, setLoading] = useState(true);
   const [isError, setIsError] = useState(false);
@@ -44,18 +45,27 @@ export default function TypingGame() {
     const maxTextLength = localStorage.getItem('typingMaxLength') ? Number(localStorage.getItem('typingMaxLength')) : 500;
     const category = localStorage.getItem('typingCategory') || '';
     const result = await getTypingText(maxTextLength, category);
-    if (!result.error) {
-      setKanji(result.kanji);
-      setWikiInfo({ title: result.title || '', url: result.url || '' });
-      // 🌟 記号を取り除いてからライブラリに渡す
-      const cleanHiragana = result.hiragana.replace(/[『』「」()（）]/g, '');
-      const newTyping = new TypingText(cleanHiragana);
-      
-      setTyping(newTyping);
-      syncDisplay(newTyping); // 初期状態を同期
-      setStartTime(null);
-      setMissCount(0);
+    if ('error' in result && result.error) {
+      setIsError(true);
+      setLoading(false);
+      return;
     }
+    
+    // @ts-ignore
+    const { kanji: resKanji, segments: resSegments, title: resTitle, url: resUrl, hiragana: resHiragana } = result;
+    
+    setKanji(resKanji);
+    setSegments(resSegments || []); // 🌟 セグメント情報をStateに保存
+    setWikiInfo({ title: resTitle || '', url: resUrl || '' });
+    // 🌟 記号を取り除いてからライブラリに渡す
+    const cleanHiragana = resHiragana.replace(/[『』「」()（）]/g, '');
+    const newTyping = new TypingText(cleanHiragana);
+      
+    setTyping(newTyping);
+    syncDisplay(newTyping); // 初期状態を同期
+    setStartTime(null);
+    setMissCount(0);
+    
     setLoading(false);
   }, [syncDisplay]);
 
@@ -187,7 +197,29 @@ export default function TypingGame() {
           {/* お題（漢字交じり）の表示部分：文字を小さくし、長ければスクロール */}
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-6 overflow-y-auto max-h-[25vh] text-left">
             <h1 className="text-xl md:text-2xl font-bold text-gray-700 leading-relaxed">
-              {kanji}
+              {(() => {
+                if (!segments || segments.length === 0) return kanji;
+                
+                let currentCompletedLength = display.completedText.length;
+                let readingOffset = 0;
+
+                return segments.map((seg, i) => {
+                  const segReadingLength = seg.reading.length;
+                  // readingが空（記号など）の場合、直前の文字が完了していれば一緒に完了とするなど
+                  const isCompleted = (readingOffset + segReadingLength <= currentCompletedLength) && (segReadingLength > 0 || readingOffset <= currentCompletedLength);
+                  const isCurrent = !isCompleted && readingOffset <= currentCompletedLength;
+                  
+                  readingOffset += segReadingLength;
+
+                  if (isCompleted) {
+                    return <span key={i} className="text-gray-300">{seg.text}</span>;
+                  } else if (isCurrent) {
+                    return <span key={i} className="text-blue-500">{seg.text}</span>;
+                  } else {
+                    return <span key={i}>{seg.text}</span>;
+                  }
+                });
+              })()}
             </h1>
           </div>
 

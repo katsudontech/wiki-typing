@@ -45,13 +45,23 @@ export async function getTypingText(maxLength: number = 500, category: string = 
     // 2. Gemini APIで変換
     const prompt = `以下の日本語を、タイピング練習の文章として
 ふさわしい形で、最大${maxLength}文字に要約した上で、
-漢字と「全てひらがな」に変換してJSONで返して。
+元の文章（漢字交じり）と、その読み方（全てひらがな）を、意味のまとまりごとに分割してJSON配列で返して。
     【超重要ルール】
-    1. ひらがな側には、『』や「」、（）などの記号を絶対に含まないこと。
-    2. 句読点（。、）もタイピングの邪魔になるので、ひらがな側からは取り除いて。
-    3. 全て繋げたひらがなのみを出力して。
+    1. 読み方（reading）側には、『』や「」、（）などの記号を絶対に含まないこと。空文字（""）にして。
+    2. 句読点（。、）もタイピングの邪魔になるので、読み方（reading）側からは取り除き、空文字（""）にして。
+    3. 全て繋げたときに元の文章になるように。
 
-    {"kanji": "...", "hiragana": "..."}
+    フォーマット例:
+    {
+      "segments": [
+        {"text": "吾輩", "reading": "わがはい"},
+        {"text": "は", "reading": "は"},
+        {"text": "猫", "reading": "ねこ"},
+        {"text": "である", "reading": "である"},
+        {"text": "。", "reading": ""}
+      ]
+    }
+    
     テキスト：${originalText}`;
     const result = await model.generateContent(prompt);
     const geminiRes = result.response.text();
@@ -60,7 +70,21 @@ export async function getTypingText(maxLength: number = 500, category: string = 
     const jsonMatch = geminiRes.match(/\{.*\}/s);
     if (!jsonMatch) throw new Error('Invalid Gemini Response');
     
-    const data = JSON.parse(jsonMatch[0]);
+    const parsedData = JSON.parse(jsonMatch[0]);
+    
+    let fullKanji = "";
+    let fullHiragana = "";
+    if (parsedData.segments) {
+      for (const seg of parsedData.segments) {
+        fullKanji += seg.text;
+        fullHiragana += seg.reading;
+      }
+    }
+    const data = {
+      kanji: fullKanji,
+      hiragana: fullHiragana,
+      segments: parsedData.segments
+    };
     const wikiUrl = `https://ja.wikipedia.org/?curid=${pageId}`;
 
     return { ...data, url: wikiUrl, title: pageTitle };
