@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getTypingText } from './actions';
 import { TypingText } from "@mogamoga1024/typing-jp";
 
@@ -11,6 +11,9 @@ export default function TypingGame() {
   const [typing, setTyping] = useState<TypingText | null>(null); // タイピングロジック
   const [loading, setLoading] = useState(true);
   const [isError, setIsError] = useState(false);
+
+  // React 18 Strict Mode（開発環境）で useEffect が2回走る対策
+  const didInitialFetchRef = useRef(false);
 
   // 🌟 表示用State：これを作ることで1打鍵ごとの更新を確実に反映させる
   const [display, setDisplay] = useState({
@@ -73,6 +76,8 @@ export default function TypingGame() {
 
   // 初回読み込み
   useEffect(() => {
+    if (didInitialFetchRef.current) return;
+    didInitialFetchRef.current = true;
     fetchNewText();
   }, [fetchNewText]);
 

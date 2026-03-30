@@ -9,6 +9,7 @@ const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); // 最新
 // ▼ タイピング用のお題を生成するアクション
 export async function getTypingText(maxLength: number = 500, category: string = '') {
   try {
+    const WIKI_INPUT_LIMIT = 20000;
     let pageId;
 
     // カテゴリ（キーワード）が指定されている場合は、そのキーワードで検索してランダムに取得
@@ -34,13 +35,18 @@ export async function getTypingText(maxLength: number = 500, category: string = 
       pageId = wikiData.query.random[0].id;
     }
 
-    const textApiUrl = `https://ja.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=&explaintext=&pageids=${pageId}`;
-    const textRes = await fetch(textApiUrl);
+    // extracts の exintro を外すと「記事の全文（平文）」が取得できる
+    const textApiUrl = `https://ja.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&explaintext=1&redirects=1&pageids=${pageId}`;
+    const textRes = await fetch(textApiUrl, { cache: 'no-store' });
     const textData = await textRes.json();
     const originalText = textData.query.pages[pageId].extract;
     const pageTitle = textData.query.pages[pageId].title;
 
     if (!originalText || originalText.length < 50) throw new Error('Short text');
+
+    const promptSourceText = originalText.length > WIKI_INPUT_LIMIT
+      ? originalText.slice(0, WIKI_INPUT_LIMIT)
+      : originalText;
 
     // 2. Gemini APIで変換
     const prompt = `以下の日本語を、タイピング練習の文章として
@@ -62,7 +68,7 @@ export async function getTypingText(maxLength: number = 500, category: string = 
       ]
     }
     
-    テキスト：${originalText}`;
+    テキスト：${promptSourceText}`;
     const result = await model.generateContent(prompt);
     const geminiRes = result.response.text();
     
