@@ -15,6 +15,13 @@ export default function TypingGame() {
   // React 18 Strict Mode（開発環境）で useEffect が2回走る対策
   const didInitialFetchRef = useRef(false);
 
+  // 現在入力中（現在単語）に追従してスクロールするための参照
+  const currentKanjiSegmentRef = useRef<HTMLSpanElement | null>(null);
+  const romanCaretRef = useRef<HTMLSpanElement | null>(null);
+  const setCurrentKanjiSegmentEl = useCallback((el: HTMLSpanElement | null) => {
+    currentKanjiSegmentRef.current = el;
+  }, []);
+
   // 🌟 表示用State：これを作ることで1打鍵ごとの更新を確実に反映させる
   const [display, setDisplay] = useState({
     completedText: '',
@@ -148,6 +155,26 @@ export default function TypingGame() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [typing, startTime, missCount, results, syncDisplay, kanji, wikiInfo]);
 
+  // 現在位置に合わせてスクロール（スクロール枠内で“今入力中”が見えるようにする）
+  useEffect(() => {
+    if (results) return;
+
+    const rafId = window.requestAnimationFrame(() => {
+      currentKanjiSegmentRef.current?.scrollIntoView({
+        block: 'nearest',
+        inline: 'nearest',
+        behavior: 'auto',
+      });
+      romanCaretRef.current?.scrollIntoView({
+        block: 'center',
+        inline: 'nearest',
+        behavior: 'auto',
+      });
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [display.completedText.length, display.completedRoman.length, results, segments.length]);
+
   // --- レンダリング (UI) ---
 
   if (loading || (!typing && !results)) {
@@ -219,7 +246,7 @@ export default function TypingGame() {
                   if (isCompleted) {
                     return <span key={i} className="text-gray-300">{seg.text}</span>;
                   } else if (isCurrent) {
-                    return <span key={i} className="text-blue-500">{seg.text}</span>;
+                    return <span key={i} ref={setCurrentKanjiSegmentEl} className="text-blue-500">{seg.text}</span>;
                   } else {
                     return <span key={i}>{seg.text}</span>;
                   }
@@ -242,6 +269,7 @@ export default function TypingGame() {
             {/* メインのローマ字表示 (text-6xl から 3xl に縮小) */}
             <div className="text-3xl md:text-4xl font-mono tracking-wider break-all leading-relaxed">
               <span className="text-gray-200">{display.completedRoman}</span>
+              <span ref={romanCaretRef} aria-hidden className="inline-block w-0 h-0" />
               <span className="text-gray-800">{display.remainingRoman}</span>
             </div>
           </div>

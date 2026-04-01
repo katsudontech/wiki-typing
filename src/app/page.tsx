@@ -20,14 +20,20 @@ export default function TypingTitle() {
             GAME START
           </Link>
           
-          <div className="text-sm text-gray-400">
-            <p>Ready to use your HHKB?</p>
-            <p className="mt-1 italic">ホームポジションを確認してください</p>
-          </div>
         </div>
-        <div className="mt-12 text-sm text-gray-500">
-            <Link href="/settings" className="hover:underline">Settings</Link>
-            <Link href="/stats" className="ml-4 hover:underline">Statistics</Link>
+        <div className="mt-10 flex flex-col sm:flex-row items-stretch justify-center gap-3">
+          <Link
+            href="/settings"
+            className="inline-flex items-center justify-center w-64 sm:w-auto px-6 py-3 rounded-xl bg-white border border-gray-200 text-gray-700 font-semibold shadow-sm hover:bg-gray-100 transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+          >
+            Settings
+          </Link>
+          <Link
+            href="/stats"
+            className="inline-flex items-center justify-center w-64 sm:w-auto px-6 py-3 rounded-xl bg-white border border-gray-200 text-gray-700 font-semibold shadow-sm hover:bg-gray-100 transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+          >
+            Statistics
+          </Link>
         </div>
       </div>
     </main>
