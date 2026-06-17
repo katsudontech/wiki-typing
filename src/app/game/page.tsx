@@ -51,6 +51,7 @@ export default function TypingGame() {
   // お題を取得して初期化する
   const fetchNewText = useCallback(async () => {
     setLoading(true);
+    setIsError(false);
     setResults(null);
     const maxTextLength = localStorage.getItem('typingMaxLength') ? Number(localStorage.getItem('typingMaxLength')) : 500;
     const category = localStorage.getItem('typingCategory') || '';
@@ -69,14 +70,21 @@ export default function TypingGame() {
     setWikiInfo({ title: resTitle || '', url: resUrl || '' });
     // 🌟 記号を取り除いてからライブラリに渡す
     const cleanHiragana = resHiragana.replace(/[『』「」()（）]/g, '');
-    const newTyping = new TypingText(cleanHiragana);
-      
-    setTyping(newTyping);
-    syncDisplay(newTyping); // 初期状態を同期
-    setStartTime(null);
-    setMissCount(0);
     
-    setLoading(false);
+    try {
+      const newTyping = new TypingText(cleanHiragana);
+        
+      setTyping(newTyping);
+      syncDisplay(newTyping); // 初期状態を同期
+      setStartTime(null);
+      setMissCount(0);
+      
+      setLoading(false);
+    } catch (e) {
+      console.error("Failed to initialize TypingText:", e);
+      setIsError(true);
+      setLoading(false);
+    }
   }, [syncDisplay]);
 
   // --- Effect (副作用) ---
@@ -179,10 +187,25 @@ export default function TypingGame() {
 
   if (loading || (!typing && !results)) {
     return (
-      <main className="flex items-center justify-center min-h-screen bg-gray-50">
+      <main className={`flex items-center justify-center min-h-screen ${isError ? 'bg-red-50' : 'bg-gray-50'}`}>
         <div className="text-center">
-          <div className="animate-spin h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-xl text-gray-500">Wikipediaから記事を抽出中...</p>
+          {isError ? (
+            <>
+              <div className="text-red-500 text-5xl mb-4">⚠️</div>
+              <p className="text-xl text-red-600 font-bold mb-4">テキストの生成に失敗しました</p>
+              <button 
+                onClick={fetchNewText}
+                className="bg-red-500 text-white px-6 py-2 rounded-full font-bold hover:bg-red-600 transition"
+              >
+                再試行する
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="animate-spin h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+              <p className="text-xl text-gray-500">Wikipediaから記事を抽出中...</p>
+            </>
+          )}
         </div>
       </main>
     );

@@ -66,7 +66,7 @@ export async function getTypingText(maxLength: number = 500, category: string = 
       ? originalText.slice(0, WIKI_INPUT_LIMIT)
       : originalText;
 
-    // 2. Gemini APIで変換
+    // 2. Transform with Gemini API
     const prompt = `以下の日本語を、タイピング練習の文章として
 ふさわしい形で、最大${maxLength}文字に要約した上で、
 元の文章（漢字交じり）と、その読み方（全てひらがな）を、意味のまとまりごとに分割してJSON配列で返して。
@@ -90,7 +90,7 @@ export async function getTypingText(maxLength: number = 500, category: string = 
     const result = await model.generateContent(prompt);
     const geminiRes = result.response.text();
     
-    // JSON部分だけを抽出してパース
+    // Extract only the JSON part and parse
     const jsonMatch = geminiRes.match(/\{.*\}/s);
     if (!jsonMatch) throw new Error('Invalid Gemini Response');
     
