@@ -16,7 +16,13 @@ export async function getTypingText(maxLength: number = 500, category: string = 
     if (category.trim() !== '') {
       // 検索パラメータを厳密なincategoryから、通常のキーワード検索に変更
       const searchUrl = `https://ja.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=${encodeURIComponent(category.trim())}&srlimit=50`;
-      const searchRes = await fetch(searchUrl, { cache: 'no-store' });
+      const searchRes = await fetch(searchUrl, { 
+        cache: 'no-store',
+        headers: { 'User-Agent': 'nandemo-typing/1.0 (https://github.com/mogamoga1024)' }
+      });
+      if (!searchRes.ok) {
+        throw new Error(`Wikipedia API Error (search): ${searchRes.status} ${searchRes.statusText}`);
+      }
       const searchData = await searchRes.json();
       const results = searchData.query?.search;
       
@@ -30,14 +36,26 @@ export async function getTypingText(maxLength: number = 500, category: string = 
     // カテゴリ指定がない、あるいは検索結果が見つからなかった場合は完全ランダム
     if (!pageId) {
       const wikiApiUrl = 'https://ja.wikipedia.org/w/api.php?action=query&format=json&list=random&rnnamespace=0&rnlimit=1';
-      const wikiRes = await fetch(wikiApiUrl, { cache: 'no-store' });
+      const wikiRes = await fetch(wikiApiUrl, { 
+        cache: 'no-store',
+        headers: { 'User-Agent': 'nandemo-typing/1.0 (https://github.com/mogamoga1024)' }
+      });
+      if (!wikiRes.ok) {
+        throw new Error(`Wikipedia API Error (random): ${wikiRes.status} ${wikiRes.statusText}`);
+      }
       const wikiData = await wikiRes.json();
       pageId = wikiData.query.random[0].id;
     }
 
     // extracts の exintro を外すと「記事の全文（平文）」が取得できる
     const textApiUrl = `https://ja.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&explaintext=1&redirects=1&pageids=${pageId}`;
-    const textRes = await fetch(textApiUrl, { cache: 'no-store' });
+    const textRes = await fetch(textApiUrl, { 
+      cache: 'no-store',
+      headers: { 'User-Agent': 'nandemo-typing/1.0 (https://github.com/mogamoga1024)' }
+    });
+    if (!textRes.ok) {
+      throw new Error(`Wikipedia API Error (text): ${textRes.status} ${textRes.statusText}`);
+    }
     const textData = await textRes.json();
     const originalText = textData.query.pages[pageId].extract;
     const pageTitle = textData.query.pages[pageId].title;
