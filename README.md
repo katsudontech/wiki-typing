@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ⌨️ WikiTyping
 
-## Getting Started
+Wikipediaの記事をLLM（Gemini API）で動的に要約・整形し、タイピングゲームの教材として遊べるWebアプリケーションです。
 
-First, run the development server:
+## 💡 プロジェクトの目的
+世の中にある固定のテキストを打つだけのタイピングゲームではなく、「自分の興味があるWikipediaの記事」を遊びながらインプットできる体験を作りたいと考え開発しました。
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 🛠 技術スタック
+- **Frontend / Backend**: Next.js (TypeScript)
+- **AI / LLM**: Gemini API
+
+## 🔥 アピールポイント：LLMの構造化出力とUX最適化
+本アプリケーションの開発において最大の課題は、「LLMが生成したテキストを、いかにタイピングゲームのUI（入力判定やハイライト描画）として扱いやすいデータ構造に変換するか」でした。
+
+### 1. フロントエンドの描画から逆算したプロンプト設計
+初期実装では、LLMに「漢字混じりの要約文」と「その読みがな」を別々の文字列として出力させていました。しかし、この手法ではフロントエンド側で「今ユーザーが入力しているひらがなが、元の文章のどの部分に該当するのか」を算出してハイライト表示させることが非常に困難でした。
+
+そこで、LLMの出力を単なるテキスト生成として扱うのではなく、アプリケーションのデータ構造として再設計しました。
+
+**【解決策】**
+Gemini APIに対し、Few-shotプロンプティングを用いて**「文節とその読みがなをペアにしたJSON配列」**として出力するように指示することで、フロントエンドでの描画ロジックを劇的にシンプルにしました。
+
+```javascript
+// 実際のプロンプトの抜粋
+const prompt = `以下の日本語を、タイピング練習の文章としてふさわしい形で、最大${maxLength}文字に要約した上で、
+元の文章（漢字交じり）と、その読み方（全てひらがな）を、意味のまとまりごとに分割してJSON配列で返して。
+
+【超重要ルール】
+1. 読み方（reading）側には、『』や「」、（）などの記号を絶対に含まないこと。空文字（""）にして。
+2. 句読点（。、）もタイピングの邪魔になるので、読み方（reading）側からは取り除き、空文字（""）にして。
+3. 全て繋げたときに元の文章になるように。
+
+フォーマット例:
+{
+  "segments": [
+    {"text": "吾輩", "reading": "わがはい"},
+    {"text": "は", "reading": "は"},
+    {"text": "猫", "reading": "ねこ"},
+    {"text": "である", "reading": "である"},
+    {"text": "。", "reading": ""}
+  ]
+}
+テキスト：${promptSourceText}`;
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. タイピング体験を阻害するノイズの除去
+LLMが正確に読みがなを生成しても、括弧（「」など）や句読点（。、）が含まれると、ユーザーのタイピングのリズムを崩す原因になります。
+そのため、プロンプト内で【超重要ルール】として厳格な制約を設け、`reading`（読みがな）データからのみ記号や句読点を空文字（""）として出力させることで、快適なプレイ環境を実現しています。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🚀 今後の展望・改善点
+- [今後の予定や、今実装を考えているアイデアがあればここに1〜2個書く。例：タイピング速度やスコアの保存など]
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 💻 開発環境のセットアップ手順
 
-## Learn More
+```bash
+# リポジトリのクローン
+git clone [https://github.com/YourUsername/WikiTyping.git](https://github.com/YourUsername/WikiTyping.git)
 
-To learn more about Next.js, take a look at the following resources:
+# 依存関係のインストール
+npm install
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+# 環境変数の設定 (.env.localを作成)
+# GEMINI_API_KEY=your_api_key_here を追加
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+# 開発サーバーの起動
+npm run dev
+```
