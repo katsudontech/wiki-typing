@@ -5,5 +5,9 @@ try {
   const typing = new TypingText(hiragana);
   console.log("SUCCESS");
 } catch (e) {
-  console.error("ERROR", e.message);
+  if (e instanceof Error) {
+    console.error("ERROR", e.message);
+  } else {
+    console.error("ERROR", e);
+  }
 }
