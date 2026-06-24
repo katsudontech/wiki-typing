@@ -3,8 +3,18 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { revalidatePath } from 'next/cache';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); // 最新の高速モデルを使おう！
+// トップレベルでの初期化は行わず、関数内で初期化するように変更
+// const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+// const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+function getGeminiModel() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not defined in the environment variables.');
+  }
+  const genAI = new GoogleGenerativeAI(apiKey);
+  return genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+}
 
 // ▼ タイピング用のお題を生成するアクション
 export async function getTypingText(maxLength: number = 500, category: string = '') {
@@ -67,6 +77,7 @@ export async function getTypingText(maxLength: number = 500, category: string = 
       : originalText;
 
     // 2. Transform with Gemini API
+    const model = getGeminiModel();
     const prompt = `以下の日本語を、タイピング練習の文章として
 ふさわしい形で、最大${maxLength}文字に要約した上で、
 元の文章（漢字交じり）と、その読み方（全てひらがな）を、意味のまとまりごとに分割してJSON配列で返して。
