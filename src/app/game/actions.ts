@@ -1,131 +1,143 @@
-'use server';
+"use server";
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { revalidatePath } from 'next/cache';
+import { GoogleGenAI } from "@google/genai";
+import { z } from "zod";
+import {
+  DEFAULT_CATEGORY,
+  geminiResponseJsonSchema,
+  parseGeminiResponse,
+  type TypingSegment,
+  typingRequestSchema,
+} from "@/lib/generation";
 
-// トップレベルでの初期化は行わず、関数内で初期化するように変更
-// const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-// const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+const WIKIPEDIA_USER_AGENT = "WikiTyping/1.0 (https://github.com/katsudontech/wiki-typing)";
+const WIKI_INPUT_LIMIT = 20_000;
+const GEMINI_MODEL = "gemini-2.5-flash";
+const SAFE_ERROR_MESSAGE = "文章を生成できませんでした。しばらく待ってから再試行してください。";
 
-function getGeminiModel() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not defined in the environment variables.');
-  }
-  const genAI = new GoogleGenerativeAI(apiKey);
-  return genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+const searchResponseSchema = z.object({
+  query: z.object({ search: z.array(z.object({ pageid: z.number().int().positive() })) }),
+});
+const randomResponseSchema = z.object({
+  query: z.object({ random: z.array(z.object({ id: z.number().int().positive() })).min(1) }),
+});
+const pageResponseSchema = z.object({
+  query: z.object({
+    pages: z.record(z.string(), z.object({
+      pageid: z.number().int().positive(),
+      title: z.string().min(1),
+      extract: z.string(),
+    })),
+  }),
+});
+
+export type WikipediaSource = {
+  title: string;
+  url: string;
+  license: "CC BY-SA 4.0";
+  processedBy: "Gemini";
+};
+
+export type TypingTextResult =
+  | { success: true; data: { kanji: string; hiragana: string; segments: TypingSegment[]; source: WikipediaSource } }
+  | { success: false; error: string };
+
+async function fetchWikipediaJson(url: string): Promise<unknown> {
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+  });
+  if (!response.ok) throw new Error("Wikipedia request failed");
+  return response.json() as Promise<unknown>;
 }
 
-// ▼ タイピング用のお題を生成するアクション
-export async function getTypingText(maxLength: number = 500, category: string = '') {
-  try {
-    const WIKI_INPUT_LIMIT = 20000;
-    let pageId;
-
-    // カテゴリ（キーワード）が指定されている場合は、そのキーワードで検索してランダムに取得
-    if (category.trim() !== '') {
-      // 検索パラメータを厳密なincategoryから、通常のキーワード検索に変更
-      const searchUrl = `https://ja.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=${encodeURIComponent(category.trim())}&srlimit=50`;
-      const searchRes = await fetch(searchUrl, { 
-        cache: 'no-store',
-        headers: { 'User-Agent': 'nandemo-typing/1.0 (https://github.com/mogamoga1024)' }
-      });
-      if (!searchRes.ok) {
-        throw new Error(`Wikipedia API Error (search): ${searchRes.status} ${searchRes.statusText}`);
-      }
-      const searchData = await searchRes.json();
-      const results = searchData.query?.search;
-      
-      if (results && results.length > 0) {
-        // 検索結果からランダムに1つの記事を選ぶ
-        const randomItem = results[Math.floor(Math.random() * results.length)];
-        pageId = randomItem.pageid;
-      }
+async function selectPageId(category: string): Promise<number> {
+  if (category !== DEFAULT_CATEGORY) {
+    const searchUrl = `https://ja.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=${encodeURIComponent(category)}&srlimit=50`;
+    const searchData = searchResponseSchema.parse(await fetchWikipediaJson(searchUrl));
+    if (searchData.query.search.length > 0) {
+      const selected = searchData.query.search[Math.floor(Math.random() * searchData.query.search.length)];
+      return selected.pageid;
     }
+  }
 
-    // カテゴリ指定がない、あるいは検索結果が見つからなかった場合は完全ランダム
-    if (!pageId) {
-      const wikiApiUrl = 'https://ja.wikipedia.org/w/api.php?action=query&format=json&list=random&rnnamespace=0&rnlimit=1';
-      const wikiRes = await fetch(wikiApiUrl, { 
-        cache: 'no-store',
-        headers: { 'User-Agent': 'nandemo-typing/1.0 (https://github.com/mogamoga1024)' }
-      });
-      if (!wikiRes.ok) {
-        throw new Error(`Wikipedia API Error (random): ${wikiRes.status} ${wikiRes.statusText}`);
-      }
-      const wikiData = await wikiRes.json();
-      pageId = wikiData.query.random[0].id;
-    }
+  const randomUrl = "https://ja.wikipedia.org/w/api.php?action=query&format=json&list=random&rnnamespace=0&rnlimit=1";
+  const randomData = randomResponseSchema.parse(await fetchWikipediaJson(randomUrl));
+  return randomData.query.random[0].id;
+}
 
-    // extracts の exintro を外すと「記事の全文（平文）」が取得できる
-    const textApiUrl = `https://ja.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&explaintext=1&redirects=1&pageids=${pageId}`;
-    const textRes = await fetch(textApiUrl, { 
-      cache: 'no-store',
-      headers: { 'User-Agent': 'nandemo-typing/1.0 (https://github.com/mogamoga1024)' }
+async function generateSegments(sourceText: string, maxLength: number, apiKey: string): Promise<TypingSegment[]> {
+  const ai = new GoogleGenAI({ apiKey });
+  const prompt = `以下の日本語をタイピング練習向けに最大${maxLength}文字で要約してください。
+結果は指定されたJSON Schemaに従い、意味のまとまりごとのsegmentsに分割してください。
+各textは漢字交じりの日本語、各readingは対応する読みをひらがなだけで記述してください。
+句読点・括弧・記号・空白はtextとreadingの両方から除き、全要素のtextとreadingを空にしないでください。
+readingを連結した文字列だけで元の要約全文をタイピングできるようにしてください。
+
+Wikipedia本文:
+${sourceText}`;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseJsonSchema: geminiResponseJsonSchema,
+        temperature: attempt === 0 ? 0.4 : 0.1,
+      },
     });
-    if (!textRes.ok) {
-      throw new Error(`Wikipedia API Error (text): ${textRes.status} ${textRes.statusText}`);
+
+    try {
+      if (!response.text) throw new Error("Gemini returned no text");
+      return parseGeminiResponse(response.text, maxLength).segments;
+    } catch (error) {
+      if (attempt === 1) throw error;
     }
-    const textData = await textRes.json();
-    const originalText = textData.query.pages[pageId].extract;
-    const pageTitle = textData.query.pages[pageId].title;
+  }
 
-    if (!originalText || originalText.length < 50) throw new Error('Short text');
+  throw new Error("Gemini response validation failed");
+}
 
-    const promptSourceText = originalText.length > WIKI_INPUT_LIMIT
-      ? originalText.slice(0, WIKI_INPUT_LIMIT)
-      : originalText;
+export async function getTypingText(
+  maxLength: unknown = 500,
+  category: unknown = DEFAULT_CATEGORY,
+): Promise<TypingTextResult> {
+  const request = typingRequestSchema.safeParse({ maxLength, category });
+  if (!request.success) {
+    return { success: false, error: "設定値が不正です。文字数とカテゴリを確認してください。" };
+  }
 
-    // 2. Transform with Gemini API
-    const model = getGeminiModel();
-    const prompt = `以下の日本語を、タイピング練習の文章として
-ふさわしい形で、最大${maxLength}文字に要約した上で、
-元の文章（漢字交じり）と、その読み方（全てひらがな）を、意味のまとまりごとに分割してJSON配列で返して。
-    【超重要ルール】
-    1. 読み方（reading）側には、『』や「」、（）などの記号を絶対に含まないこと。空文字（""）にして。
-    2. 句読点（。、）もタイピングの邪魔になるので、読み方（reading）側からは取り除き、空文字（""）にして。
-    3. 全て繋げたときに元の文章になるように。
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error("Typing text generation failed: GEMINI_API_KEY is not configured");
+    return { success: false, error: SAFE_ERROR_MESSAGE };
+  }
 
-    フォーマット例:
-    {
-      "segments": [
-        {"text": "吾輩", "reading": "わがはい"},
-        {"text": "は", "reading": "は"},
-        {"text": "猫", "reading": "ねこ"},
-        {"text": "である", "reading": "である"},
-        {"text": "。", "reading": ""}
-      ]
-    }
-    
-    テキスト：${promptSourceText}`;
-    const result = await model.generateContent(prompt);
-    const geminiRes = result.response.text();
-    
-    // Extract only the JSON part and parse
-    const jsonMatch = geminiRes.match(/\{.*\}/s);
-    if (!jsonMatch) throw new Error('Invalid Gemini Response');
-    
-    const parsedData = JSON.parse(jsonMatch[0]);
-    
-    let fullKanji = "";
-    let fullHiragana = "";
-    if (parsedData.segments) {
-      for (const seg of parsedData.segments) {
-        fullKanji += seg.text;
-        fullHiragana += seg.reading;
-      }
-    }
-    const data = {
-      kanji: fullKanji,
-      hiragana: fullHiragana,
-      segments: parsedData.segments
+  try {
+    const pageId = await selectPageId(request.data.category);
+    const textUrl = `https://ja.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&explaintext=1&redirects=1&pageids=${pageId}`;
+    const pageData = pageResponseSchema.parse(await fetchWikipediaJson(textUrl));
+    const page = pageData.query.pages[String(pageId)] ?? Object.values(pageData.query.pages)[0];
+    if (!page || page.extract.length < 50) throw new Error("Wikipedia article is too short");
+
+    const segments = await generateSegments(page.extract.slice(0, WIKI_INPUT_LIMIT), request.data.maxLength, apiKey);
+    return {
+      success: true,
+      data: {
+        kanji: segments.map((segment) => segment.text).join(""),
+        hiragana: segments.map((segment) => segment.reading).join(""),
+        segments,
+        source: {
+          title: page.title,
+          url: `https://ja.wikipedia.org/?curid=${page.pageid}`,
+          license: "CC BY-SA 4.0",
+          processedBy: "Gemini",
+        },
+      },
     };
-    const wikiUrl = `https://ja.wikipedia.org/?curid=${pageId}`;
-
-    return { ...data, url: wikiUrl, title: pageTitle };
-
   } catch (error) {
-    console.error(error);
-    return { error: '取得に失敗しました' };
+    console.error("Typing text generation failed", error instanceof Error ? error.name : "UnknownError");
+    return { success: false, error: SAFE_ERROR_MESSAGE };
   }
 }

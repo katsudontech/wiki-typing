@@ -1,208 +1,186 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { getTypingText } from './actions';
+import Link from "next/link";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { TypingText } from "@mogamoga1024/typing-jp";
+import { DEFAULT_CATEGORY, type TypingSegment } from "@/lib/generation";
+import { calculateScore, type ScoreResult } from "@/lib/score";
+import { getTypingText, type WikipediaSource } from "./actions";
+
+const emptyDisplay = { completedText: "", remainingText: "", completedRoman: "", remainingRoman: "" };
+
+function SourceAttribution({ source }: { source: WikipediaSource }) {
+  return (
+    <div className="text-sm text-gray-500 leading-relaxed">
+      <p>
+        出典: Wikipedia「
+        <a href={source.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+          {source.title}
+        </a>
+        」（{source.license}）
+      </p>
+      <p>{source.processedBy}で要約・読み仮名を生成しています</p>
+    </div>
+  );
+}
 
 export default function TypingGame() {
-  // --- 状態管理 (State) ---
-  const [kanji, setKanji] = useState(''); // 漢字（お題）
-  const [segments, setSegments] = useState<{text: string, reading: string}[]>([]); // 追加: お題の分割データ
-  const [typing, setTyping] = useState<TypingText | null>(null); // タイピングロジック
+  const [kanji, setKanji] = useState("");
+  const [segments, setSegments] = useState<TypingSegment[]>([]);
+  const [typing, setTyping] = useState<TypingText | null>(null);
   const [loading, setLoading] = useState(true);
   const [isError, setIsError] = useState(false);
-
-  // React 18 Strict Mode（開発環境）で useEffect が2回走る対策
-  const didInitialFetchRef = useRef(false);
-
-  // 現在入力中（現在単語）に追従してスクロールするための参照
-  const currentKanjiSegmentRef = useRef<HTMLSpanElement | null>(null);
-  const romanCaretRef = useRef<HTMLSpanElement | null>(null);
-  const setCurrentKanjiSegmentEl = useCallback((el: HTMLSpanElement | null) => {
-    currentKanjiSegmentRef.current = el;
-  }, []);
-
-  // 🌟 表示用State：これを作ることで1打鍵ごとの更新を確実に反映させる
-  const [display, setDisplay] = useState({
-    completedText: '',
-    remainingText: '',
-    completedRoman: '',
-    remainingRoman: ''
-  });
-
-  // スコア・記録用
+  const [errorMessage, setErrorMessage] = useState("");
+  const [display, setDisplay] = useState(emptyDisplay);
   const [missCount, setMissCount] = useState(0);
   const [startTime, setStartTime] = useState<number | null>(null);
-  const [results, setResults] = useState<{ kpm: number; accuracy: number; time: number } | null>(null);
-  const [wikiInfo, setWikiInfo] = useState<{ title: string; url: string }>({ title: '', url: '' });
+  const [results, setResults] = useState<ScoreResult | null>(null);
+  const [wikiInfo, setWikiInfo] = useState<WikipediaSource | null>(null);
 
-  // --- 補助関数 ---
+  const didInitialFetchRef = useRef(false);
+  const requestInFlightRef = useRef(false);
+  const currentKanjiSegmentRef = useRef<HTMLSpanElement | null>(null);
+  const romanCaretRef = useRef<HTMLSpanElement | null>(null);
+  const setCurrentKanjiSegmentEl = useCallback((element: HTMLSpanElement | null) => {
+    currentKanjiSegmentRef.current = element;
+  }, []);
 
-  // 🌟 ロジック内の文字列をStateに同期する関数
-  const syncDisplay = useCallback((t: TypingText) => {
+  const syncDisplay = useCallback((text: TypingText) => {
     setDisplay({
-      completedText: t.completedText,
-      remainingText: t.remainingText,
-      completedRoman: t.completedRoman,
-      remainingRoman: t.remainingRoman,
+      completedText: text.completedText,
+      remainingText: text.remainingText,
+      completedRoman: text.completedRoman,
+      remainingRoman: text.remainingRoman,
     });
   }, []);
 
-  // お題を取得して初期化する
   const fetchNewText = useCallback(async () => {
+    if (requestInFlightRef.current) return;
+    requestInFlightRef.current = true;
     setLoading(true);
     setIsError(false);
+    setErrorMessage("");
     setResults(null);
-    const maxTextLength = localStorage.getItem('typingMaxLength') ? Number(localStorage.getItem('typingMaxLength')) : 500;
-    const category = localStorage.getItem('typingCategory') || '';
-    const result = await getTypingText(maxTextLength, category);
-    if ('error' in result && result.error) {
-      setIsError(true);
-      setLoading(false);
-      return;
-    }
-    
-    // @ts-ignore
-    const { kanji: resKanji, segments: resSegments, title: resTitle, url: resUrl, hiragana: resHiragana } = result;
-    
-    setKanji(resKanji);
-    setSegments(resSegments || []); // 🌟 セグメント情報をStateに保存
-    setWikiInfo({ title: resTitle || '', url: resUrl || '' });
-    // 🌟 記号を取り除いてからライブラリに渡す
-    const cleanHiragana = resHiragana.replace(/[『』「」()（）]/g, '');
-    
+
     try {
-      const newTyping = new TypingText(cleanHiragana);
-        
-      setTyping(newTyping);
-      syncDisplay(newTyping); // 初期状態を同期
+      const storedMaxLength = localStorage.getItem("typingMaxLength");
+      const maxTextLength = storedMaxLength === null ? 500 : Number(storedMaxLength);
+      const category = localStorage.getItem("typingCategory")?.trim() || DEFAULT_CATEGORY;
+      const result = await getTypingText(maxTextLength, category);
+
+      if (!result.success) {
+        setIsError(true);
+        setErrorMessage(result.error);
+        setTyping(null);
+        return;
+      }
+
+      const { kanji: nextKanji, segments: nextSegments, source, hiragana } = result.data;
+      const nextTyping = new TypingText(hiragana);
+      setKanji(nextKanji);
+      setSegments(nextSegments);
+      setWikiInfo(source);
+      setTyping(nextTyping);
+      syncDisplay(nextTyping);
       setStartTime(null);
       setMissCount(0);
-      
-      setLoading(false);
-    } catch (e) {
-      console.error("Failed to initialize TypingText:", e);
+    } catch (error) {
+      console.error("Failed to initialize typing text", error instanceof Error ? error.name : "UnknownError");
       setIsError(true);
+      setErrorMessage("タイピング文章を準備できませんでした。再試行してください。");
+      setTyping(null);
+    } finally {
+      requestInFlightRef.current = false;
       setLoading(false);
     }
   }, [syncDisplay]);
 
-  // --- Effect (副作用) ---
-
-  // 初回読み込み
   useEffect(() => {
     if (didInitialFetchRef.current) return;
     didInitialFetchRef.current = true;
-    fetchNewText();
+    void fetchNewText();
   }, [fetchNewText]);
 
-  // キーボードイベントの監視
   useEffect(() => {
-    // typingがない、または結果表示中はイベントを無視
     if (!typing || results) return;
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.repeat) return;
-      if (!TypingText.isValidInputKey(e.key)) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat || !TypingText.isValidInputKey(event.key)) return;
 
-      // 最初の1打でタイマー開始
       let currentStartTime = startTime;
       if (currentStartTime === null) {
         currentStartTime = Date.now();
         setStartTime(currentStartTime);
       }
 
-      const isCapsLock = e.getModifierState("CapsLock");
-      const result = typing.inputKey(e.key, isCapsLock);
-      
-      switch (result) {
+      const inputResult = typing.inputKey(event.key, event.getModifierState("CapsLock"));
+      switch (inputResult) {
         case "unmatch":
           setIsError(true);
-          setMissCount(prev => prev + 1);
-          setTimeout(() => setIsError(false), 100);
+          setMissCount((previous) => previous + 1);
+          window.setTimeout(() => setIsError(false), 100);
           break;
-
         case "incomplete":
-          // 正解だが未完了：何もしなくても最後に同期される
           break;
-
-        case "complete":
-          const endTime = Date.now();
-          const timeInSeconds = (endTime - currentStartTime) / 1000;
-          const totalKeys = typing.completedRoman.length;
-          // KPM: (打鍵数 / 秒) * 60
-          const kpm = Math.floor((totalKeys / timeInSeconds) * 60);
-          // 正確率: 正解文字数 / (正解文字数 + ミス数)
-          const accuracy = Math.floor((totalKeys / (totalKeys + missCount)) * 100);
-          // e-typingのスコア
-          const eTypingScore = Math.floor(kpm * ((accuracy / 100) ** 3));
-
-          //localStorageに記録を保存
-          const history = JSON.parse(localStorage.getItem('typingHistory') || '[]');
-          history.push({ 
-            kanji, 
-            title: wikiInfo.title,
-            url: wikiInfo.url,
-            kpm, 
-            accuracy, 
-            eTypingScore,
-            time: timeInSeconds, 
-            date: new Date().toISOString() 
+        case "complete": {
+          const score = calculateScore(
+            typing.completedRoman.length,
+            missCount,
+            (Date.now() - currentStartTime) / 1000,
+          );
+          let history: unknown[] = [];
+          try {
+            const stored: unknown = JSON.parse(localStorage.getItem("typingHistory") || "[]");
+            if (Array.isArray(stored)) history = stored;
+          } catch {
+            history = [];
+          }
+          history.push({
+            kanji,
+            title: wikiInfo?.title,
+            url: wikiInfo?.url,
+            license: wikiInfo?.license,
+            processedBy: wikiInfo?.processedBy,
+            ...score,
+            date: new Date().toISOString(),
           });
-          localStorage.setItem('typingHistory', JSON.stringify(history));
-
-          setResults({ kpm, accuracy, time: timeInSeconds });
+          localStorage.setItem("typingHistory", JSON.stringify(history));
+          setResults(score);
           break;
+        }
       }
-
-      // 🌟 毎回必ずStateを更新して画面をリライトさせる！
       syncDisplay(typing);
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [typing, startTime, missCount, results, syncDisplay, kanji, wikiInfo]);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [kanji, missCount, results, startTime, syncDisplay, typing, wikiInfo]);
 
-  // 現在位置に合わせてスクロール（スクロール枠内で“今入力中”が見えるようにする）
   useEffect(() => {
     if (results) return;
-
-    const rafId = window.requestAnimationFrame(() => {
-      currentKanjiSegmentRef.current?.scrollIntoView({
-        block: 'nearest',
-        inline: 'nearest',
-        behavior: 'auto',
-      });
-      romanCaretRef.current?.scrollIntoView({
-        block: 'center',
-        inline: 'nearest',
-        behavior: 'auto',
-      });
+    const frameId = window.requestAnimationFrame(() => {
+      currentKanjiSegmentRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      romanCaretRef.current?.scrollIntoView({ block: "center", inline: "nearest" });
     });
-
-    return () => window.cancelAnimationFrame(rafId);
-  }, [display.completedText.length, display.completedRoman.length, results, segments.length]);
-
-  // --- レンダリング (UI) ---
+    return () => window.cancelAnimationFrame(frameId);
+  }, [display.completedRoman.length, display.completedText.length, results, segments.length]);
 
   if (loading || (!typing && !results)) {
     return (
-      <main className={`flex items-center justify-center min-h-screen ${isError ? 'bg-red-50' : 'bg-gray-50'}`}>
-        <div className="text-center">
+      <main className={`flex items-center justify-center min-h-screen ${isError ? "bg-red-50" : "bg-gray-50"}`}>
+        <div className="text-center px-4">
           {isError ? (
             <>
               <div className="text-red-500 text-5xl mb-4">⚠️</div>
-              <p className="text-xl text-red-600 font-bold mb-4">テキストの生成に失敗しました</p>
-              <button 
-                onClick={fetchNewText}
-                className="bg-red-500 text-white px-6 py-2 rounded-full font-bold hover:bg-red-600 transition"
-              >
+              <p className="text-xl text-red-600 font-bold mb-2">テキストの生成に失敗しました</p>
+              <p className="text-gray-600 mb-4">{errorMessage}</p>
+              <button type="button" onClick={() => void fetchNewText()} disabled={loading} className="bg-red-500 disabled:bg-gray-400 text-white px-6 py-2 rounded-full font-bold hover:bg-red-600 transition">
                 再試行する
               </button>
             </>
           ) : (
             <>
-              <div className="animate-spin h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+              <div className="animate-spin h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4" />
               <p className="text-xl text-gray-500">Wikipediaから記事を抽出中...</p>
             </>
           )}
@@ -212,101 +190,49 @@ export default function TypingGame() {
   }
 
   return (
-    <main className={`flex flex-col items-center justify-center min-h-screen transition-colors duration-100 
-      ${isError ? 'bg-red-50' : 'bg-gray-50'}`}>
-      
+    <main className={`flex flex-col items-center justify-center min-h-screen transition-colors duration-100 ${isError ? "bg-red-50" : "bg-gray-50"}`}>
       {results ? (
-        /* スコア結果表示画面 */
-        <div className="text-center bg-white p-12 rounded-3xl shadow-2xl border-4 border-green-400 animate-in fade-in zoom-in duration-300">
+        <div className="text-center bg-white p-8 md:p-12 rounded-3xl shadow-2xl border-4 border-green-400 animate-in fade-in zoom-in duration-300 max-w-4xl mx-4">
           <h2 className="text-3xl font-bold mb-8 text-green-600">Clear! 🎉</h2>
-          <div className="grid grid-cols-3 gap-12 mb-10">
-            <div>
-              <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">KPM (Speed)</p>
-              <p className="text-6xl font-black text-gray-800">{results.kpm}</p>
-            </div>
-            <div>
-              <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">Accuracy</p>
-              <p className="text-6xl font-black text-gray-800">{results.accuracy}<span className="text-2xl">%</span></p>
-            </div>
-            <div>
-              <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">Time</p>
-              <p className="text-6xl font-black text-gray-800">{results.time.toFixed(1)}<span className="text-2xl">s</span></p>
-            </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-8">
+            <div><p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">KPM</p><p className="text-5xl font-black text-gray-800">{results.kpm}</p></div>
+            <div><p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">Score</p><p className="text-5xl font-black text-gray-800">{results.eTypingScore}</p></div>
+            <div><p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">Accuracy</p><p className="text-5xl font-black text-gray-800">{results.accuracy}<span className="text-2xl">%</span></p></div>
+            <div><p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">Time</p><p className="text-5xl font-black text-gray-800">{results.time.toFixed(1)}<span className="text-2xl">s</span></p></div>
           </div>
-          <button 
-            onClick={fetchNewText} 
-            className="bg-green-500 text-white px-12 py-4 rounded-full font-bold text-xl hover:bg-green-600 transition shadow-lg active:scale-95"
-          >
-            Next Challenge
-          </button>
-          <button
-            onClick={() => window.location.href = '/'}
-            className="ml-4 bg-gray-300 text-gray-800 px-8 py-3 rounded-full font-medium text-lg hover:bg-gray-400 transition"
-          >
-            Return to Tiltle
-          </button>
+          <p className="text-sm text-gray-500 mb-6">Score = KPM × (正確率 ÷ 100)³（小数点以下切り捨て）</p>
+          {wikiInfo && <div className="mb-8"><SourceAttribution source={wikiInfo} /></div>}
+          <button type="button" onClick={() => void fetchNewText()} disabled={loading} className="bg-green-500 disabled:bg-gray-400 text-white px-10 py-3 rounded-full font-bold text-lg hover:bg-green-600 transition shadow-lg active:scale-95">Next Challenge</button>
+          <Link href="/" className="ml-4 inline-block bg-gray-300 text-gray-800 px-8 py-3 rounded-full font-medium text-lg hover:bg-gray-400 transition">Return to Title</Link>
         </div>
       ) : (
-        /* 通常のタイピング画面 */
         <div className="max-w-5xl w-full px-4 md:px-8 text-center flex flex-col max-h-[95vh] py-8">
-          {/* お題（漢字交じり）の表示部分：文字を小さくし、長ければスクロール */}
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-6 overflow-y-auto max-h-[25vh] text-left">
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-4 overflow-y-auto max-h-[25vh] text-left">
             <h1 className="text-xl md:text-2xl font-bold text-gray-700 leading-relaxed">
-              {(() => {
-                if (!segments || segments.length === 0) return kanji;
-                
-                let currentCompletedLength = display.completedText.length;
+              {segments.length === 0 ? kanji : (() => {
+                const completedLength = display.completedText.length;
                 let readingOffset = 0;
-
-                return segments.map((seg, i) => {
-                  const segReadingLength = seg.reading.length;
-                  // readingが空（記号など）の場合、直前の文字が完了していれば一緒に完了とするなど
-                  const isCompleted = (readingOffset + segReadingLength <= currentCompletedLength) && (segReadingLength > 0 || readingOffset <= currentCompletedLength);
-                  const isCurrent = !isCompleted && readingOffset <= currentCompletedLength;
-                  
-                  readingOffset += segReadingLength;
-
-                  if (isCompleted) {
-                    return <span key={i} className="text-gray-300">{seg.text}</span>;
-                  } else if (isCurrent) {
-                    return <span key={i} ref={setCurrentKanjiSegmentEl} className="text-blue-500">{seg.text}</span>;
-                  } else {
-                    return <span key={i}>{seg.text}</span>;
-                  }
+                return segments.map((segment, index) => {
+                  const readingLength = segment.reading.length;
+                  const isCompleted = readingOffset + readingLength <= completedLength;
+                  const isCurrent = !isCompleted && readingOffset <= completedLength;
+                  readingOffset += readingLength;
+                  if (isCompleted) return <span key={index} className="text-gray-300">{segment.text}</span>;
+                  if (isCurrent) return <span key={index} ref={setCurrentKanjiSegmentEl} className="text-blue-500">{segment.text}</span>;
+                  return <span key={index}>{segment.text}</span>;
                 });
               })()}
             </h1>
           </div>
-
-          {/* タイピング入力部分（ローマ字・ひらがな）：アルファベットを小さくし、枠内に収める */}
+          {wikiInfo && <div className="mb-4"><SourceAttribution source={wikiInfo} /></div>}
           <div className="bg-white p-8 md:p-12 rounded-[2rem] shadow-2xl border border-gray-100 mb-6 relative text-left overflow-y-auto max-h-[50vh]">
-            {/* 装飾用の背景ロゴ的なもの */}
             <div className="absolute top-6 right-8 text-gray-100 font-black text-xl select-none">HHKB TYPE</div>
-            
-            {/* ひらがなガイド */}
-            <div className="text-lg md:text-xl mb-4 font-medium tracking-[0.2em] min-h-[2rem]">
-              <span className="text-gray-200">{display.completedText}</span>
-              <span className="text-blue-500">{display.remainingText}</span>
-            </div>
-
-            {/* メインのローマ字表示 (text-6xl から 3xl に縮小) */}
-            <div className="text-3xl md:text-4xl font-mono tracking-wider break-all leading-relaxed">
-              <span className="text-gray-200">{display.completedRoman}</span>
-              <span ref={romanCaretRef} aria-hidden className="inline-block w-0 h-0" />
-              <span className="text-gray-800">{display.remainingRoman}</span>
-            </div>
+            <div className="text-lg md:text-xl mb-4 font-medium tracking-[0.2em] min-h-[2rem]"><span className="text-gray-200">{display.completedText}</span><span className="text-blue-500">{display.remainingText}</span></div>
+            <div className="text-3xl md:text-4xl font-mono tracking-wider break-all leading-relaxed"><span className="text-gray-200">{display.completedRoman}</span><span ref={romanCaretRef} aria-hidden className="inline-block w-0 h-0" /><span className="text-gray-800">{display.remainingRoman}</span></div>
           </div>
-
-          {/* 下部のインフォメーション */}
           <div className="flex justify-between items-center text-gray-400 text-sm px-2 md:px-6 mt-auto">
-            <div className="flex gap-8">
-              <span>MISS: <span className={`font-bold ${missCount > 0 ? 'text-red-400' : 'text-gray-300'}`}>{missCount}</span></span>
-              <span>PROGRESS: <span className="text-gray-600 font-bold">{Math.floor((display.completedText.length / (display.completedText.length + display.remainingText.length || 1)) * 100)}%</span></span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${startTime ? 'bg-green-400 animate-pulse' : 'bg-gray-300'}`}></div>
-              <p className="italic font-serif">Typing Journey with Wikipedia</p>
-            </div>
+            <div className="flex gap-8"><span>MISS: <span className={`font-bold ${missCount > 0 ? "text-red-400" : "text-gray-300"}`}>{missCount}</span></span><span>PROGRESS: <span className="text-gray-600 font-bold">{Math.floor((display.completedText.length / (display.completedText.length + display.remainingText.length || 1)) * 100)}%</span></span></div>
+            <div className="flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${startTime ? "bg-green-400 animate-pulse" : "bg-gray-300"}`} /><p className="italic font-serif">Typing Journey with Wikipedia</p></div>
           </div>
         </div>
       )}
